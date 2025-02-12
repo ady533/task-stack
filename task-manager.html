@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- Previous head section remains the same -->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Manager for ADHD</title>
+    <style>
+        /* All previous styles remain exactly the same */
+        :root {
+            --bg-color: #ffffff;
+            --text-color: #333333;
+            --card-bg: #f5f5f5;
+            --border-color: #dddddd;
+            --priority-low: #4caf50;
+            --priority-medium: #ff9800;
+            --priority-high: #f44336;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #1a1a1a;
+                --text-color: #ffffff;
+                --card-bg: #2d2d2d;
+                --border-color: #404040;
+            }
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .task-input {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background-color: var(--card-bg);
+            color: var(--text-color);
+        }
+
+        .task-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .task-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 10px;
+            cursor: move;
+        }
+
+        .task-card.dragging {
+            opacity: 0.5;
+        }
+
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .task-title {
+            margin: 0;
+            flex-grow: 1;
+        }
+
+        .task-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .subtasks {
+            margin-left: 20px;
+            margin-top: 10px;
+        }
+
+        .completed {
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+
+        button {
+            padding: 5px 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background-color: var(--text-color);
+            color: var(--bg-color);
+        }
+
+        .priority-selector {
+            padding: 5px;
+            margin-right: 10px;
+            background-color: var(--card-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+        }
+
+        .focus-mode {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--bg-color);
+            padding: 20px;
+            z-index: 1000;
+            display: none;
+        }
+
+        .focus-mode.active {
+            display: block;
+        }
+
+        .priority-low { border-left: 4px solid var(--priority-low); }
+        .priority-medium { border-left: 4px solid var(--priority-medium); }
+        .priority-high { border-left: 4px solid var(--priority-high); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Task Manager</h1>
+        <input type="text" class="task-input" placeholder="Add a new task" id="newTaskInput">
+        <ul class="task-list" id="taskList"></ul>
+    </div>
+
+    <div class="focus-mode" id="focusMode">
+        <h2>Focus Mode</h2>
+        <div id="focusContent"></div>
+        <button onclick="exitFocusMode()">Exit Focus Mode</button>
+    </div>
+
+    <script>
+        let tasks = JSON.parse(localStorage.getItem('tasks')) || [];
+
+        function createTask(title, priority = 'medium') {
+            return {
+                id: Date.now(),
+                title,
+                completed: false,
+                priority,
+                subtasks: [],
+            };
+        }
+
+        function createSubtask(parentId, title) {
+            const task = tasks.find(t => t.id === parentId);
+            if (task) {
+                task.subtasks.unshift({  // Changed to unshift for subtasks too
+                    id: Date.now(),
+                    title,
+                    completed: false
+                });
+                saveTasks();
+                renderTasks();
+            }
+        }
+
+        function saveTasks() {
+            localStorage.setItem('tasks', JSON.stringify(tasks));
+        }
+
+        function toggleComplete(taskId, isSubtask = false, parentId = null) {
+            if (isSubtask) {
+                const parent = tasks.find(t => t.id === parentId);
+                const subtask = parent.subtasks.find(st => st.id === taskId);
+                subtask.completed = !subtask.completed;
+            } else {
+                const task = tasks.find(t => t.id === taskId);
+                task.completed = !task.completed;
+            }
+            saveTasks();
+            renderTasks();
+        }
+
+        function deleteTask(taskId, isSubtask = false, parentId = null) {
+            if (isSubtask) {
+                const parent = tasks.find(t => t.id === parentId);
+                parent.subtasks = parent.subtasks.filter(st => st.id !== taskId);
+            } else {
+                tasks = tasks.filter(t => t.id !== taskId);
+            }
+            saveTasks();
+            renderTasks();
+        }
+
+        function changePriority(taskId, priority) {
+            const task = tasks.find(t => t.id === taskId);
+            task.priority = priority;
+            saveTasks();
+            renderTasks();
+        }
+
+        function enterFocusMode(taskId) {
+            const task = tasks.find(t => t.id === taskId);
+            const focusMode = document.getElementById('focusMode');
+            const focusContent = document.getElementById('focusContent');
+            
+            focusContent.innerHTML = `
+                <h3>${task.title}</h3>
+                <p>Focus on this task. You can do it!</p>
+                <button onclick="toggleComplete(${taskId})">
+                    ${task.completed ? 'Mark Incomplete' : 'Mark Complete'}
+                </button>
+            `;
+            
+            focusMode.classList.add('active');
+        }
+
+        function exitFocusMode() {
+            document.getElementById('focusMode').classList.remove('active');
+        }
+
+        function renderTasks() {
+            const taskList = document.getElementById('taskList');
+            taskList.innerHTML = '';
+
+            tasks.forEach(task => {
+                const taskElement = document.createElement('li');
+                taskElement.className = `task-card priority-${task.priority}`;
+                taskElement.draggable = true;
+                taskElement.dataset.taskId = task.id;
+
+                taskElement.innerHTML = `
+                    <div class="task-header ${task.completed ? 'completed' : ''}">
+                        <h3 class="task-title">${task.title}</h3>
+                        <div class="task-controls">
+                            <select class="priority-selector" onchange="changePriority(${task.id}, this.value)">
+                                <option value="low" ${task.priority === 'low' ? 'selected' : ''}>Low</option>
+                                <option value="medium" ${task.priority === 'medium' ? 'selected' : ''}>Medium</option>
+                                <option value="high" ${task.priority === 'high' ? 'selected' : ''}>High</option>
+                            </select>
+                            <button onclick="enterFocusMode(${task.id})">Focus</button>
+                            <button onclick="toggleComplete(${task.id})">${task.completed ? 'â©ï¸' : 'â'}</button>
+                            <button onclick="deleteTask(${task.id})">ðï¸</button>
+                            <button onclick="addSubtask(${task.id})">+</button>
+                        </div>
+                    </div>
+                `;
+
+                if (task.subtasks.length > 0) {
+                    const subtasksList = document.createElement('ul');
+                    subtasksList.className = 'subtasks';
+
+                    task.subtasks.forEach(subtask => {
+                        const subtaskElement = document.createElement('li');
+                        subtaskElement.className = `task-card ${subtask.completed ? 'completed' : ''}`;
+                        subtaskElement.innerHTML = `
+                            <div class="task-header">
+                                <h4 class="task-title">${subtask.title}</h4>
+                                <div class="task-controls">
+                                    <button onclick="toggleComplete(${subtask.id}, true, ${task.id})">${subtask.completed ? 'â©ï¸' : 'â'}</button>
+                                    <button onclick="deleteTask(${subtask.id}, true, ${task.id})">ðï¸</button>
+                                </div>
+                            </div>
+                        `;
+                        subtasksList.appendChild(subtaskElement);
+                    });
+
+                    taskElement.appendChild(subtasksList);
+                }
+
+                taskList.appendChild(taskElement);
+            });
+
+            setupDragAndDrop();
+        }
+
+        function setupDragAndDrop() {
+            const taskElements = document.querySelectorAll('.task-card');
+            const taskList = document.getElementById('taskList');
+
+            taskElements.forEach(task => {
+                task.addEventListener('dragstart', () => {
+                    task.classList.add('dragging');
+                });
+
+                task.addEventListener('dragend', () => {
+                    task.classList.remove('dragging');
+                });
+            });
+
+            taskList.addEventListener('dragover', e => {
+                e.preventDefault();
+                const draggingTask = document.querySelector('.dragging');
+                if (!draggingTask) return;
+
+                const siblings = [...taskList.querySelectorAll('.task-card:not(.dragging)')];
+                const nextSibling = siblings.find(sibling => {
+                    const box = sibling.getBoundingClientRect();
+                    return e.clientY <= box.top + box.height / 2;
+                });
+
+                taskList.insertBefore(draggingTask, nextSibling);
+                
+                // Update tasks array to match new order
+                const newOrder = Array.from(taskList.children).map(item => 
+                    tasks.find(t => t.id === parseInt(item.dataset.taskId))
+                ).filter(Boolean);
+                tasks = newOrder;
+                saveTasks();
+            });
+        }
+
+        function addSubtask(parentId) {
+            const title = prompt('Enter subtask:');
+            if (title) {
+                createSubtask(parentId, title);
+            }
+        }
+
+        document.getElementById('newTaskInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && e.target.value.trim()) {
+                tasks.unshift(createTask(e.target.value.trim())); // Changed from push to unshift
+                e.target.value = '';
+                saveTasks();
+                renderTasks();
+            }
+        });
+
+        // Initial render
+        renderTasks();
+    </script>
+</body>
+</html>
